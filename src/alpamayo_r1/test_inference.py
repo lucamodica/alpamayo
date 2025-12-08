@@ -19,6 +19,7 @@
 
 import torch
 import numpy as np
+from nuscenes import NuScenes
 
 from alpamayo_r1.models.alpamayo_r1 import AlpamayoR1
 from alpamayo_r1.load_physical_aiavdataset import load_physical_aiavdataset
@@ -30,7 +31,10 @@ clip_id = "030c760c-ae38-49aa-9ad8-f5650a545d26"
 print(f"Loading dataset for clip_id: {clip_id}...")
 data = load_physical_aiavdataset(clip_id, t0_us=5_100_000)
 print("Dataset loaded.")
+
 messages = helper.create_message(data["image_frames"].flatten(0, 1))
+
+print(f"shape images: {data['image_frames'].shape}")
 
 model = AlpamayoR1.from_pretrained("nvidia/Alpamayo-R1-10B", dtype=torch.bfloat16).to("cuda")
 processor = helper.get_processor(model.tokenizer)
@@ -50,6 +54,8 @@ model_inputs = {
 }
 
 model_inputs = helper.to_device(model_inputs, "cuda")
+print(f"model inputs: { {k: v.shape for k, v in model_inputs.items() if isinstance(v, torch.Tensor)} }")
+# print(f"input waypoints: {data['ego_future_xyz']}")
 
 torch.cuda.manual_seed_all(42)
 with torch.autocast("cuda", dtype=torch.bfloat16):
@@ -57,13 +63,15 @@ with torch.autocast("cuda", dtype=torch.bfloat16):
         data=model_inputs,
         top_p=0.98,
         temperature=0.6,
-        num_traj_samples=1,  # Feel free to raise this for more output trajectories and CoC traces.
+        num_traj_samples=3,  # Feel free to raise this for more output trajectories and CoC traces.
         max_generation_length=256,
         return_extra=True,
     )
 
 # the size is [batch_size, num_traj_sets, num_traj_samples]
 print("Chain-of-Causation (per trajectory):\n", extra["cot"][0])
+print("Predicted trajectory shape:", pred_xyz.shape)
+print("Ground truth future shape:", data["ego_future_xyz"].shape)
 
 gt_xy = data["ego_future_xyz"].cpu()[0, 0, :, :2].T.numpy()
 pred_xy = pred_xyz.cpu().numpy()[0, 0, :, :, :2].transpose(0, 2, 1)
